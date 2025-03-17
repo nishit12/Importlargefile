@@ -9,6 +9,10 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.ByteArrayOutputStream;
+
+import android.net.Uri;
 import android.util.Base64;
 import android.util.Log;
 
@@ -38,17 +42,24 @@ public class FileuploadPluginPlugin extends Plugin {
         }
 
         try {
-            // Remove "file://" prefix if exists
-            String sanitizedPath = filePath.replace("file://", "");
-            File file = new File(sanitizedPath);
+            byte[] fileData;
 
-            if (!file.exists()) {
-                call.reject("File does not exist at path: " + sanitizedPath);
-                return;
+            if (filePath.startsWith("content://")) {
+                Log.d("FileuploadPlugin", "Detected content:// URI, processing...");
+                fileData = readFileFromContentUri(filePath);
+            } else {
+                // Remove "file://" prefix if exists
+                String sanitizedPath = filePath.replace("file://", "");
+                File file = new File(sanitizedPath);
+
+                if (!file.exists()) {
+                    call.reject("File does not exist at path: " + sanitizedPath);
+                    return;
+                }
+
+                fileData = implementation.readFileToByteArray(file);
             }
 
-            // Process file to get base64 and byte array
-            byte[] fileData = implementation.readFileToByteArray(file);
             if (fileData == null) {
                 call.reject("Failed to read file");
                 return;
@@ -65,10 +76,36 @@ public class FileuploadPluginPlugin extends Plugin {
             result.put("byteArray", fileData);
 
             call.resolve(result);
-            implementation.cleanupMemory(); // Free memory after processing
+            implementation.cleanupMemory();
 
         } catch (Exception e) {
             call.reject("Error processing file: " + e.getMessage());
+        }
+    }
+
+    private byte[] readFileFromContentUri(String contentUri) throws IOException {
+        InputStream inputStream = null;
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        try {
+            Uri uri = Uri.parse(contentUri);
+            inputStream = getActivity().getContentResolver().openInputStream(uri);
+
+            if (inputStream == null) {
+                throw new IOException("Failed to open input stream for URI: " + contentUri);
+            }
+
+            byte[] data = new byte[1024];
+            int bytesRead;
+            
+            while ((bytesRead = inputStream.read(data, 0, data.length)) != -1) {
+                buffer.write(data, 0, bytesRead);
+            }
+
+            return buffer.toByteArray();
+        } finally {
+            if (inputStream != null) {
+                inputStream.close();
+            }
         }
     }
 }
